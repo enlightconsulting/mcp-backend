@@ -51,6 +51,11 @@ async def root():
         "health": "/health"
     }
 
-@app.get("/health")
+@app.get("/health", response_model=dict)
 async def health_check():
-    return {"status": "healthy"} 
+    return {
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "version": "1.0.0",
+        "service": "mcp-backend"
+    } 
