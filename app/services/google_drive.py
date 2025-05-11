@@ -33,9 +33,24 @@ class GoogleDriveService:
     def authenticate(self):
         """サービスアカウントを使用して認証"""
         try:
-            credentials = service_account.Credentials.from_service_account_file(
-                SERVICE_ACCOUNT_FILE, scopes=SCOPES
-            )
+            # 環境変数から認証情報を取得
+            service_account_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
+            if service_account_json:
+                # 環境変数から認証
+                service_account_info = json.loads(service_account_json)
+                credentials = service_account.Credentials.from_service_account_info(
+                    service_account_info,
+                    scopes=SCOPES
+                )
+            elif os.path.exists(SERVICE_ACCOUNT_FILE):
+                # ファイルから認証
+                credentials = service_account.Credentials.from_service_account_file(
+                    SERVICE_ACCOUNT_FILE,
+                    scopes=SCOPES
+                )
+            else:
+                raise Exception("認証情報が見つかりません。環境変数GOOGLE_SERVICE_ACCOUNT_JSONまたはservice_account.jsonファイルが必要です。")
+
             self.service = build("drive", "v3", credentials=credentials)
         except Exception as e:
             raise Exception(f"Google Driveの認証に失敗しました: {str(e)}")
