@@ -19,7 +19,9 @@ app = FastAPI(
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
-    openapi_url="/openapi.json"
+    openapi_url="/openapi.json",
+    root_path="",
+    root_path_in_servers=True
 )
 
 # CORSの設定を更新
