@@ -19,7 +19,8 @@ app = FastAPI(
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
-    openapi_url="/openapi.json"
+    openapi_url="/openapi.json",
+    root_path=""
 )
 
 # CORSの設定を更新
@@ -39,7 +40,7 @@ app.add_middleware(
 )
 
 # ルーターの追加
-app.include_router(drive.router)
+app.include_router(drive.router, prefix="/api")
 
 @app.get("/", response_model=dict)
 async def root():
