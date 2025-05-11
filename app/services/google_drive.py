@@ -1,96 +1,99 @@
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from google.auth.transport.requests import Request
+from google.oauth2 import service_account
 from googleapiclient.discovery import build
+from typing import List, Optional
 import os
-import pickle
-import socket
-from typing import List, Dict, Any
-from app.models.document import DocumentType, DocumentMetadata
+import json
 from datetime import datetime
+from pydantic import BaseModel
+from enum import Enum
+from app.models.document import DocumentType, DocumentMetadata
 
 SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
+SERVICE_ACCOUNT_FILE = 'service_account.json'
 
-def find_free_port():
-    """空いているポートを見つけます"""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(('', 0))
-        s.listen(1)
-        port = s.getsockname()[1]
-    return port
+class FileType(str, Enum):
+    FOLDER = "folder"
+    FILE = "file"
+
+class FileInfo(BaseModel):
+    id: str
+    name: str
+    type: FileType
+    mime_type: Optional[str] = None
+    size: Optional[int] = None
+    created_time: Optional[datetime] = None
+    modified_time: Optional[datetime] = None
+    web_view_link: Optional[str] = None
 
 class GoogleDriveService:
-    def __init__(self, credentials_path: str = 'credentials.json'):
-        self.credentials_path = credentials_path
+    def __init__(self):
         self.service = None
+        self.authenticate()
 
-    def authenticate(self) -> None:
-        """Google Drive APIの認証を行います"""
-        creds = None
-        if os.path.exists('token.pickle'):
-            with open('token.pickle', 'rb') as token:
-                creds = pickle.load(token)
-
-        if not creds or not creds.valid:
-            if creds and creds.expired and creds.refresh_token:
-                creds.refresh(Request())
-            else:
-                flow = InstalledAppFlow.from_client_secrets_file(
-                    self.credentials_path, SCOPES)
-                # 認証URLを表示して、ユーザーに手動で認証を促す
-                auth_url, _ = flow.authorization_url(prompt='consent')
-                print(f'以下のURLにアクセスして認証を完了してください: {auth_url}')
-                code = input('認証コードを入力してください: ')
-                creds = flow.fetch_token(code=code)
-            
-            with open('token.pickle', 'wb') as token:
-                pickle.dump(creds, token)
-
-        self.service = build('drive', 'v3', credentials=creds)
-
-    def list_files(self, page_size: int = 10) -> List[Dict[str, Any]]:
-        """ファイルの一覧を取得します"""
-        if not self.service:
-            self.authenticate()
-
+    def authenticate(self):
+        """サービスアカウントを使用して認証"""
         try:
-            results = self.service.files().list(
-                pageSize=page_size,
-                fields="nextPageToken, files(id, name, mimeType, createdTime)"
-            ).execute()
-            
-            return results.get('files', [])
+            credentials = service_account.Credentials.from_service_account_file(
+                SERVICE_ACCOUNT_FILE, scopes=SCOPES
+            )
+            self.service = build("drive", "v3", credentials=credentials)
         except Exception as e:
-            # 認証エラーの場合は再認証を試みる
-            if 'invalid_grant' in str(e):
-                if os.path.exists('token.pickle'):
-                    os.remove('token.pickle')
+            raise Exception(f"Google Driveの認証に失敗しました: {str(e)}")
+
+    def list_files(self, folder_id: Optional[str] = None, page_size: int = 100) -> List[FileInfo]:
+        """指定されたフォルダ内のファイル一覧を取得"""
+        try:
+            if not self.service:
                 self.authenticate()
-                return self.list_files(page_size)
-            raise e
 
-    def search_files(self, query: str, page_size: int = 10) -> List[Dict[str, Any]]:
-        """ファイルを検索します"""
-        if not self.service:
-            self.authenticate()
+            query = f"'{folder_id}' in parents" if folder_id else None
+            results = self.service.files().list(
+                q=query,
+                pageSize=page_size,
+                fields="files(id, name, mimeType, size, createdTime, modifiedTime, webViewLink)"
+            ).execute()
 
-        results = self.service.files().list(
-            q=query,
-            pageSize=page_size,
-            fields="nextPageToken, files(id, name, mimeType, createdTime)"
-        ).execute()
-        
-        return results.get('files', [])
+            files = []
+            for item in results.get("files", []):
+                file_type = FileType.FOLDER if item.get("mimeType") == "application/vnd.google-apps.folder" else FileType.FILE
+                files.append(FileInfo(
+                    id=item["id"],
+                    name=item["name"],
+                    type=file_type,
+                    mime_type=item.get("mimeType"),
+                    size=int(item.get("size", 0)) if item.get("size") else None,
+                    created_time=datetime.fromisoformat(item.get("createdTime").replace("Z", "+00:00")) if item.get("createdTime") else None,
+                    modified_time=datetime.fromisoformat(item.get("modifiedTime").replace("Z", "+00:00")) if item.get("modifiedTime") else None,
+                    web_view_link=item.get("webViewLink")
+                ))
+            return files
+        except Exception as e:
+            raise Exception(f"ファイル一覧の取得に失敗しました: {str(e)}")
 
-    def get_file_metadata(self, file_id: str) -> Dict[str, Any]:
-        """ファイルのメタデータを取得します"""
-        if not self.service:
-            self.authenticate()
+    def get_file(self, file_id: str) -> FileInfo:
+        """指定されたIDのファイル情報を取得"""
+        try:
+            if not self.service:
+                self.authenticate()
 
-        return self.service.files().get(
-            fileId=file_id,
-            fields="id, name, mimeType, createdTime, modifiedTime, description"
-        ).execute()
+            file = self.service.files().get(
+                fileId=file_id,
+                fields="id, name, mimeType, size, createdTime, modifiedTime, webViewLink"
+            ).execute()
+
+            file_type = FileType.FOLDER if file.get("mimeType") == "application/vnd.google-apps.folder" else FileType.FILE
+            return FileInfo(
+                id=file["id"],
+                name=file["name"],
+                type=file_type,
+                mime_type=file.get("mimeType"),
+                size=int(file.get("size", 0)) if file.get("size") else None,
+                created_time=datetime.fromisoformat(file.get("createdTime").replace("Z", "+00:00")) if file.get("createdTime") else None,
+                modified_time=datetime.fromisoformat(file.get("modifiedTime").replace("Z", "+00:00")) if file.get("modifiedTime") else None,
+                web_view_link=file.get("webViewLink")
+            )
+        except Exception as e:
+            raise Exception(f"ファイル情報の取得に失敗しました: {str(e)}")
 
     def classify_document(self, file_name: str) -> DocumentType:
         """ファイル名からドキュメントの種類を分類します"""
@@ -109,12 +112,12 @@ class GoogleDriveService:
 
     def get_document_metadata(self, file_id: str) -> DocumentMetadata:
         """ファイルの詳細なメタデータを取得します"""
-        metadata = self.get_file_metadata(file_id)
+        file_info = self.get_file(file_id)
         
         return DocumentMetadata(
-            id=metadata['id'],
-            name=metadata['name'],
-            type=self.classify_document(metadata['name']),
-            created_at=datetime.fromisoformat(metadata['createdTime'].replace('Z', '+00:00')),
-            updated_at=datetime.fromisoformat(metadata['modifiedTime'].replace('Z', '+00:00'))
+            id=file_info.id,
+            name=file_info.name,
+            type=self.classify_document(file_info.name),
+            created_at=file_info.created_time,
+            updated_at=file_info.modified_time
         ) 
