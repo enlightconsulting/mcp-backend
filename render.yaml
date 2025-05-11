@@ -13,10 +13,6 @@ services:
         fromDatabase:
           name: mcp-db
           property: connectionString
-      - key: GOOGLE_CLIENT_ID
-        sync: false
-      - key: GOOGLE_CLIENT_SECRET
-        sync: false
       - key: GOOGLE_REDIRECT_URI
         value: https://mcp-backend.onrender.com/oauth2-redirect
       - key: ENVIRONMENT
