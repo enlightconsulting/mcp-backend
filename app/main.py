@@ -41,9 +41,15 @@ app.add_middleware(
 # ルーターの追加
 app.include_router(drive.router)
 
-@app.get("/")
+@app.get("/", response_model=dict)
 async def root():
-    return {"message": "Welcome to MCP Backend"}
+    return {
+        "message": "Welcome to MCP Backend",
+        "version": "1.0.0",
+        "status": "running",
+        "docs": "/docs",
+        "health": "/health"
+    }
 
 @app.get("/health")
 async def health_check():
